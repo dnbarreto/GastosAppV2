@@ -1,13 +1,300 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>React OK</title></head>
-<body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Control de Gastos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:," />
+  <style>
+    /* Fondo en modo oscuro */
+    html.dark body { background: linear-gradient(to bottom, #0f172a, #020617); }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-b from-white to-slate-50 p-4 sm:p-6">
   <div id="root"></div>
+
+  <!-- React 18 UMD + Babel para usar JSX SIN build -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
   <script type="text/babel">
-    const App = () => <h1 style={{fontFamily:'system-ui', padding:24}}>Funciona (React + Babel)</h1>;
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
-</body></html>
+    const { useMemo, useState, useEffect } = React;
+
+    // ====== Datos por defecto ======
+    const DEFAULT_CATEGORIES = [
+      'Arriendo','Servicios Publicos','Subscripciones','Transporte','Restaurantes',
+      'Mercado','Ropa','Medicina','Deporte','Ocio','Aseo','Otros'
+    ];
+    const DEFAULT_METHODS = [
+      { value: 'efectivo', label: 'Efectivo' },
+      { value: 't-mastercard', label: 'T-Mastercard' },
+      { value: 't-amex', label: 'T-Amex' },
+      { value: 't-visa', label: 'T-Visa' },
+      { value: 't-bog', label: 'T-Bog' },
+      { value: 'scotiabank', label: 'ScotiaBank' },
+      { value: 'bancolombia', label: 'Bancolombia' },
+      { value: 'nequi', label: 'Nequi' },
+      { value: 'daviplata', label: 'Daviplata' },
+      { value: 'otro', label: 'Otro' },
+    ];
+
+    const currencyFormat = (n) => {
+      if (n == null || isNaN(n)) return '$0';
+      try { return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n); }
+      catch { return '$' + Number(n).toLocaleString('es-CO'); }
+    };
+
+    function useLocalState(key, initial) {
+      const [val, setVal] = useState(() => {
+        try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : initial; } catch { return initial; }
+      });
+      useEffect(() => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }, [key, val]);
+      return [val, setVal];
+    }
+
+    function useLocalBool(key, initial=false) {
+      const [val, setVal] = useState(() => {
+        try { const raw = localStorage.getItem(key); return raw ? raw === '1' : initial; } catch { return initial; }
+      });
+      useEffect(() => { try { localStorage.setItem(key, val ? '1' : '0'); } catch {} }, [key, val]);
+      return [val, setVal];
+    }
+
+    // BarChart simple (horizontal) sin librerías externas
+    function BarChart({ data, labelKey, valueKey }) {
+      const max = Math.max(1, ...data.map(d => Number(d[valueKey]||0)));
+      return (
+        <div className="space-y-2">
+          {data.map((d, i) => (
+            <div key={i}>
+              <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
+                <span className="truncate pr-2">{d[labelKey]}</span>
+                <span>{currencyFormat(d[valueKey])}</span>
+              </div>
+              <div className="h-2 w-full rounded bg-slate-100 dark:bg-slate-700">
+                <div className="h-2 rounded bg-slate-900 dark:bg-slate-200" style={{ width: `${(Number(d[valueKey]||0) / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function App() {
+      // Dark mode (clase en <html>)
+      const [dark, setDark] = useLocalBool('dark', false);
+      useEffect(() => {
+        const root = document.documentElement;
+        dark ? root.classList.add('dark') : root.classList.remove('dark');
+      }, [dark]);
+
+      const [budget, setBudget] = useLocalState('budget', 2000000);
+      const [items, setItems] = useLocalState('items', []);
+      const [methods, setMethods] = useLocalState('methods', DEFAULT_METHODS);
+      const [categories, setCategories] = useLocalState('categories', DEFAULT_CATEGORIES);
+
+      const [desc, setDesc] = useState('');
+      const [amount, setAmount] = useState('');
+      const [method, setMethod] = useState(methods[0]?.value || 'efectivo');
+      const [category, setCategory] = useState(categories[0] || 'Otros');
+      const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
+
+      const [newMethodLabel, setNewMethodLabel] = useState('');
+      const [newMethodValue, setNewMethodValue] = useState('');
+      const [newCategory, setNewCategory] = useState('');
+
+      useEffect(() => { if (!methods.find(m => m.value === method) && methods[0]) setMethod(methods[0].value); }, [methods]);
+      useEffect(() => { if (!categories.includes(category) && categories[0]) setCategory(categories[0]); }, [categories]);
+
+      const total = useMemo(() => items.reduce((s, it) => s + Number(it.amount||0), 0), [items]);
+      const remaining = Math.max((Number(budget)||0) - total, 0);
+      const progress = Math.min(total / Math.max(Number(budget)||1, 1) * 100, 100);
+
+      const byMethod = useMemo(() => {
+        const agg = Object.fromEntries(methods.map(m => [m.value, 0]));
+        items.forEach(it => { agg[it.method] = (agg[it.method]||0) + Number(it.amount||0); });
+        return Object.entries(agg).map(([key, value]) => ({ key, method: methods.find(m=>m.value===key)?.label || key, total: value }));
+      }, [items, methods]);
+
+      const byCategory = useMemo(() => {
+        const agg = Object.fromEntries(categories.map(c => [c, 0]));
+        items.forEach(it => { agg[it.category] = (agg[it.category]||0) + Number(it.amount||0); });
+        return Object.entries(agg).map(([category, total]) => ({ category, total }));
+      }, [items, categories]);
+
+      function addItem() {
+        const val = Number(amount);
+        if (!desc.trim() || !val || val <= 0) return;
+        const it = { id: crypto?.randomUUID?.() || Math.random().toString(36).slice(2), desc: desc.trim(), amount: val, method, category, date };
+        setItems([it, ...items]);
+        setDesc(''); setAmount('');
+      }
+      const removeItem = (id) => setItems(items.filter(x => x.id !== id));
+      const clearAll = () => { if (confirm('¿Borrar todos los gastos?')) setItems([]); };
+      const exportCSV = () => {
+        const header = ['fecha','descripcion','monto','medio','categoria'].join(',');
+        const rows = items.map(it => [it.date, '"'+(it.desc||'').replaceAll('"','""')+'"', it.amount, it.method, '"'+(it.category||'').replaceAll('"','""')+'"'].join(',')).join('\n');
+        const csv = header + '\n' + rows;
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'gastos.csv'; a.click(); URL.revokeObjectURL(url);
+      };
+
+      function addMethod() {
+        const label = newMethodLabel.trim();
+        const value = (newMethodValue || label).toLowerCase().replace(/\s+/g, '-');
+        if (!label || methods.some(m => m.value === value)) return;
+        setMethods([...methods, { value, label }]);
+        setNewMethodLabel(''); setNewMethodValue('');
+      }
+      function removeMethod(value) {
+        setMethods(methods.filter(m => m.value !== value));
+      }
+      function addCategory() {
+        const c = newCategory.trim();
+        if (!c || categories.includes(c)) return;
+        setCategories([...categories, c]);
+        setNewCategory('');
+      }
+      function removeCategory(c) {
+        setCategories(categories.filter(x => x !== c));
+      }
+
+      return (
+        <div className="mx-auto max-w-6xl space-y-6 text-slate-900 dark:text-slate-100">
+          <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Control de Gastos</h1>
+              <p className="text-sm text-slate-500 dark:text-slate-300">Registra gastos, agrupa por medio y categoría, y cuida tu presupuesto.</p>
+            </div>
+            <div className="flex gap-2">
+              <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border" onClick={() => setDark(!dark)}>{dark ? 'Modo claro' : 'Modo oscuro'}</button>
+              <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border" onClick={exportCSV}>Exportar CSV</button>
+              <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border" onClick={clearAll}>Borrar todo</button>
+            </div>
+          </header>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm text-slate-600 dark:text-slate-300 mb-2">Presupuesto (mes)</div>
+              <div className="flex items-center gap-2">
+                <input className="w-full rounded-xl border px-3 py-2 text-sm text-right dark:bg-slate-900 dark:border-slate-700" type="number" value={budget}
+                  onChange={e => setBudget(Number(e.target.value||0))} />
+                <span className="text-sm text-slate-500 dark:text-slate-300">COP</span>
+              </div>
+            </div>
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm text-slate-600 dark:text-slate-300 mb-2">Gastado</div>
+              <div className="text-2xl font-semibold">{currencyFormat(total)}</div>
+              <div className="mt-2">
+                <div className="h-2 w-full rounded bg-slate-100 dark:bg-slate-700">
+                  <div className={`h-2 rounded ${total>budget? 'bg-red-600':'bg-slate-900 dark:bg-slate-200'}`} style={{ width: `${progress}%` }} />
+                </div>
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-300">{Math.round(progress)}% del presupuesto</div>
+              </div>
+            </div>
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm text-slate-600 dark:text-slate-300 mb-2">Restante</div>
+              <div className={`text-2xl font-semibold ${total>budget ? 'text-red-600':''}`}>{currencyFormat(remaining)}</div>
+              {total>budget && (
+                <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-400/30 dark:bg-red-950/30 dark:text-red-300">Has superado tu presupuesto por {currencyFormat(total-budget)}.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="text-sm font-medium mb-3">Agregar gasto</div>
+            <div className="grid gap-3 sm:grid-cols-6">
+              <div className="sm:col-span-2"><input className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" placeholder="Descripción" value={desc} onChange={e=>setDesc(e.target.value)} /></div>
+              <div><input className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" type="number" placeholder="Monto" value={amount} onChange={e=>setAmount(e.target.value)} /></div>
+              <div>
+                <select className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" value={method} onChange={e=>setMethod(e.target.value)}>
+                  {methods.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <select className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" value={category} onChange={e=>setCategory(e.target.value)}>
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div><input className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" type="date" value={date} onChange={e=>setDate(e.target.value)} /></div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border bg-slate-900 text-white border-slate-900" onClick={addItem}>Agregar</button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm font-medium mb-3">Consolidado por medio de pago</div>
+              <BarChart data={byMethod} labelKey="method" valueKey="total" />
+            </div>
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm font-medium mb-3">Consolidado por categoría</div>
+              <BarChart data={byCategory} labelKey="category" valueKey="total" />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="text-sm font-medium mb-3">Gastos ({items.length})</div>
+            {items.length === 0 ? (
+              <div className="rounded-xl border bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">Aún no hay gastos.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 dark:text-slate-300">
+                      <th className="p-2">Fecha</th>
+                      <th className="p-2">Descripción</th>
+                      <th className="p-2">Medio</th>
+                      <th className="p-2">Categoría</th>
+                      <th className="p-2 text-right">Monto</th>
+                      <th className="p-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(it => (
+                      <tr key={it.id} className="border-t dark:border-slate-700">
+                        <td className="p-2 align-top text-slate-600 dark:text-slate-300">{it.date}</td>
+                        <td className="p-2 align-top">{it.desc}</td>
+                        <td className="p-2 align-top"><span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2 py-1 text-xs dark:bg-slate-900 dark:text-slate-200">{methods.find(m=>m.value===it.method)?.label}</span></td>
+                        <td className="p-2 align-top text-slate-700 dark:text-slate-200">{it.category}</td>
+                        <td className="p-2 align-top text-right font-medium">{currencyFormat(it.amount)}</td>
+                        <td className="p-2 align-top text-right"><button className="inline-flex items-center justify-center rounded-2xl px-3 py-1.5 text-xs font-medium border" onClick={() => removeItem(it.id)}>🗑️</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm font-medium mb-3">Administrar medios de pago</div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <input className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" placeholder="Etiqueta (ej. Mi Visa)" value={newMethodLabel} onChange={e=>setNewMethodLabel(e.target.value)} />
+                <input className="w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" placeholder="Identificador (opcional)" value={newMethodValue} onChange={e=>setNewMethodValue(e.target.value)} />
+              </div>
+              <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border mb-2" onClick={addMethod}>Agregar medio</button>
+              <div className="flex flex-wrap gap-2">
+                {methods.map(m => (
+                  <span key={m.value} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2 py-1 text-xs dark:bg-slate-900 dark:text-slate-200">
+                    {m.label}
+                    <button className="rounded-full p-1 hover:bg-slate-200 dark:hover:bg-slate-800" onClick={() => removeMethod(m.value)}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-sm font-medium mb-3">Administrar categorías</div>
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                <input className="col-span-2 w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" placeholder="Nueva categoría" value={newCategory} onChange={e=>setNewCategory(e.target.value)} />
+                <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border" onClick={addCategory}>Agregar</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {categories.map(c
