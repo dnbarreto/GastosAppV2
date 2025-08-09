@@ -8,14 +8,12 @@
   <meta name="color-scheme" content="light dark" />
   <link rel="icon" href="data:," />
   <style>
-    /* Fondo en modo oscuro */
     html.dark body { background: linear-gradient(to bottom, #0f172a, #020617); }
   </style>
 </head>
 <body class="min-h-screen bg-gradient-to-b from-white to-slate-50 p-4 sm:p-6">
   <div id="root"></div>
 
-  <!-- React 18 UMD + Babel para usar JSX SIN build -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -23,7 +21,6 @@
   <script type="text/babel">
     const { useMemo, useState, useEffect } = React;
 
-    // ====== Datos por defecto ======
     const DEFAULT_CATEGORIES = [
       'Arriendo','Servicios Publicos','Subscripciones','Transporte','Restaurantes',
       'Mercado','Ropa','Medicina','Deporte','Ocio','Aseo','Otros'
@@ -63,7 +60,6 @@
       return [val, setVal];
     }
 
-    // BarChart simple (horizontal) sin librerías externas
     function BarChart({ data, labelKey, valueKey }) {
       const max = Math.max(1, ...data.map(d => Number(d[valueKey]||0)));
       return (
@@ -84,7 +80,6 @@
     }
 
     function App() {
-      // Dark mode (clase en <html>)
       const [dark, setDark] = useLocalBool('dark', false);
       useEffect(() => {
         const root = document.documentElement;
@@ -290,11 +285,29 @@
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-white shadow-sm p-4 dark:border-slate-700 dark:bg-slate-800">
+            <div className="rounded-2xl border bg-white shadow	sm p-4 dark:border-slate-700 dark:bg-slate-800">
               <div className="text-sm font-medium mb-3">Administrar categorías</div>
               <div className="grid grid-cols-3 gap-2 mb-2">
                 <input className="col-span-2 w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700" placeholder="Nueva categoría" value={newCategory} onChange={e=>setNewCategory(e.target.value)} />
                 <button className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium border" onClick={addCategory}>Agregar</button>
               </div>
               <div className="flex flex-wrap gap-2">
-                {categories.map(c
+                {categories.map(c => (
+                  <span key={c} className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2 py-1 text-xs dark:bg-slate-900 dark:text-slate-200">
+                    {c}
+                    <button className="rounded-full p-1 hover:bg-slate-200 dark:hover:bg-slate-800" onClick={() => removeCategory(c)}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <footer className="py-2 text-center text-xs text-slate-400 dark:text-slate-500">Tus datos se guardan localmente en tu navegador (localStorage).</footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
